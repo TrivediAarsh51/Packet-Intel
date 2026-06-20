@@ -245,9 +245,19 @@ class PacketProcessor:
                         description=clean_null_chars(a['description']),
                         evidence=clean_null_chars(a.get('evidence'))
                     )
-                    self.db.add(db_alert)                    if a.get('severity', '').lower() == 'high' or a.get('alert_type') in ('dns_tunneling', 'port_scan', 'icmp_tunnel'):
+                    self.db.add(db_alert)
+
+                    if a.get('severity', '').lower() == 'high' or a.get('alert_type') in (
+                        'dns_tunneling',
+                        'port_scan',
+                        'icmp_tunnel'
+                    ):
                         try:
-                            auto_create_case_for_alert(self.session_id, a, session_file_path=file_path)
+                            auto_create_case_for_alert(
+                                self.session_id,
+                                a,
+                                session_file_path=file_path
+                            )
                         except Exception as exc:
                             print(f"Auto case workflow failed: {exc}")
             # Update session
