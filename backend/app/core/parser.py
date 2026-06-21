@@ -1,4 +1,5 @@
 import os
+import re
 import hashlib
 import datetime
 import json
@@ -13,6 +14,12 @@ except ImportError:
 
 from ..models import Packet, CaptureSession, TrafficFlow, Alert
 from .case_workflow import auto_create_case_for_alert
+from .threat_intel import (
+    EXFILTRATION_SIGNATURES,
+    BOTNET_IP_BLACKLIST,
+    BOTNET_DOMAIN_BLACKLIST,
+    calculate_entropy,
+)
 
 
 def clean_null_chars(s: Optional[str]) -> Optional[str]:
@@ -29,17 +36,82 @@ def compute_sha256(file_path: str) -> str:
     return sha256_hash.hexdigest()
 
 
+# ---------------------------------------------------------------------------
+# TLS / HTTPS handshake detection helper
+# ---------------------------------------------------------------------------
+
+_TLS_CONTENT_TYPES = {20, 21, 22, 23}  # change_cipher_spec, alert, handshake, app_data
+_TLS_VERSIONS = {
+    b'\x03\x01',  # TLS 1.0
+    b'\x03\x02',  # TLS 1.1
+    b'\x03\x03',  # TLS 1.2 / 1.3 (negotiated as 1.3 in extension)
+}
+
+
+def _is_tls_record(payload: bytes) -> bool:
+    """
+    Return True if *payload* looks like a TLS record layer.
+
+    Heuristic: first byte is a recognised TLS content type AND bytes 1-2 are
+    a recognised TLS/SSL version.  This is far more reliable than checking
+    dst_port == 443 alone, because:
+      - Many non-TLS protocols also use port 443
+      - Attackers often tunnel C2 over port 443 without TLS
+    """
+    if len(payload) < 5:
+        return False
+    return (
+        payload[0] in _TLS_CONTENT_TYPES
+        and payload[1:3] in _TLS_VERSIONS
+    )
+
+
 class ThreatDetector:
-    """Simple signature-based threat detection during packet parsing."""
+    """Multi-engine threat detector used during PCAP packet parsing.
+
+    Engines
+    -------
+    1. DNS tunneling heuristic (long queries)
+    2. Port-scan tracker (unique destination port count)
+    3. Oversized ICMP payload (ICMP tunneling)
+    4. Payload signature engine — regex DPI for data exfiltration patterns
+       (credit cards with Luhn validation, SSNs, credentials, API keys …)
+    5. Shannon entropy analysis — detects encrypted / obfuscated payloads,
+       suppressed only when the payload is confirmed as a TLS record (not
+       merely because dst_port == 443).
+    6. Botnet / C2 blacklist — IP and domain IOC matching.
+    """
 
     def __init__(self):
         self.dns_query_counts = {}
         self.port_scan_tracker = {}
 
-    def analyze_packet(self, pkt_data: dict) -> List[dict]:
+    # -----------------------------------------------------------------------
+    # Public interface
+    # -----------------------------------------------------------------------
+
+    def analyze_packet(
+        self,
+        pkt_data: dict,
+        raw_payload: Optional[bytes] = None,
+    ) -> List[dict]:
+        """Run all detection engines against one packet.
+
+        Parameters
+        ----------
+        pkt_data:
+            Dict of parsed packet metadata (src/dst IP, ports, protocol, …).
+        raw_payload:
+            Raw bytes of the packet payload layer (``scapy.Raw.load``), or
+            ``None`` if the packet has no payload.
+
+        Returns
+        -------
+        List of alert dicts ready for DB persistence.
+        """
         alerts = []
 
-        # DNS Tunneling: long queries
+        # --- Engine 1: DNS Tunneling (long queries) -------------------------
         if pkt_data.get('protocol') == 'DNS' and pkt_data.get('dns_query'):
             query = pkt_data['dns_query']
             src = pkt_data.get('src_ip', '')
@@ -49,11 +121,14 @@ class ThreatDetector:
                     'severity': 'high',
                     'src_ip': src,
                     'dst_ip': pkt_data.get('dst_ip'),
-                    'description': f'Suspicious long DNS query detected ({len(query)} chars): {query[:80]}...',
-                    'evidence': json.dumps({'query': query, 'length': len(query)})
+                    'description': (
+                        f'Suspicious long DNS query detected '
+                        f'({len(query)} chars): {query[:80]}...'
+                    ),
+                    'evidence': json.dumps({'query': query, 'length': len(query)}),
                 })
 
-        # Port Scan Detection
+        # --- Engine 2: Port Scan Detection ----------------------------------
         src = pkt_data.get('src_ip', '')
         dst_port = pkt_data.get('dst_port')
         if src and dst_port:
@@ -67,20 +142,209 @@ class ThreatDetector:
                     'severity': 'medium',
                     'src_ip': src,
                     'dst_ip': pkt_data.get('dst_ip'),
-                    'description': f'Possible port scan from {src}: {unique} unique destination ports probed',
-                    'evidence': json.dumps({'unique_ports': unique})
+                    'description': (
+                        f'Possible port scan from {src}: '
+                        f'{unique} unique destination ports probed'
+                    ),
+                    'evidence': json.dumps({'unique_ports': unique}),
                 })
 
-        # Large ICMP payload (potential ICMP tunnel)
+        # --- Engine 3: Large ICMP payload (ICMP tunneling) ------------------
         if pkt_data.get('protocol') == 'ICMP' and pkt_data.get('length', 0) > 200:
             alerts.append({
                 'alert_type': 'icmp_tunnel',
                 'severity': 'medium',
                 'src_ip': pkt_data.get('src_ip'),
                 'dst_ip': pkt_data.get('dst_ip'),
-                'description': f'Unusually large ICMP packet ({pkt_data["length"]} bytes) — possible ICMP tunneling',
-                'evidence': json.dumps({'length': pkt_data['length']})
+                'description': (
+                    f'Unusually large ICMP packet ({pkt_data["length"]} bytes) '
+                    f'— possible ICMP tunneling'
+                ),
+                'evidence': json.dumps({'length': pkt_data['length']}),
             })
+
+        # --- Engines 4-6: payload-dependent (skip if no payload) ------------
+        if raw_payload:
+            alerts.extend(self._check_payload_signatures(raw_payload, pkt_data))
+            alerts.extend(self._check_entropy(raw_payload, pkt_data))
+
+        alerts.extend(self._check_botnet_blacklist(pkt_data))
+
+        return alerts
+
+    # -----------------------------------------------------------------------
+    # Engine 4: Payload signature / DPI
+    # -----------------------------------------------------------------------
+
+    def _check_payload_signatures(
+        self,
+        raw_payload: bytes,
+        pkt_data: dict,
+    ) -> List[dict]:
+        """Scan *raw_payload* against all EXFILTRATION_SIGNATURES rules."""
+        alerts = []
+        try:
+            # Decode payload to text; ignore non-UTF-8 bytes
+            payload_text = raw_payload.decode('utf-8', errors='ignore')
+        except Exception:
+            return alerts
+
+        for rule in EXFILTRATION_SIGNATURES:
+            match = rule.pattern.search(payload_text)
+            if match is None:
+                continue
+
+            matched_str = match.group() if hasattr(match, 'group') else str(match)
+            # Redact the middle of sensitive values before logging
+            display = self._redact(matched_str)
+
+            alerts.append({
+                'alert_type': rule.alert_type,
+                'severity': rule.severity,
+                'src_ip': pkt_data.get('src_ip'),
+                'dst_ip': pkt_data.get('dst_ip'),
+                'description': rule.description_tmpl.format(match=display),
+                'evidence': json.dumps({
+                    'signature_name': rule.name,
+                    'protocol': pkt_data.get('protocol'),
+                    'dst_port': pkt_data.get('dst_port'),
+                    'payload_size': len(raw_payload),
+                }),
+            })
+
+        return alerts
+
+    @staticmethod
+    def _redact(value: str, keep: int = 4) -> str:
+        """Partially redact a sensitive string, keeping *keep* chars at each end."""
+        if len(value) <= keep * 2 + 2:
+            return '***'
+        return value[:keep] + '*' * (len(value) - keep * 2) + value[-keep:]
+
+    # -----------------------------------------------------------------------
+    # Engine 5: Shannon entropy analysis
+    # -----------------------------------------------------------------------
+
+    _ENTROPY_MIN_BYTES = 64        # smaller payloads give unreliable entropy
+    _ENTROPY_HIGH_THRESHOLD = 7.2  # strongly encrypted / packed
+    _ENTROPY_MED_THRESHOLD = 5.0   # compressed / partially encrypted
+
+    def _check_entropy(
+        self,
+        raw_payload: bytes,
+        pkt_data: dict,
+    ) -> List[dict]:
+        """Detect unusually high-entropy payloads that may be encrypted or packed.
+
+        Suppression policy
+        ------------------
+        The alert is suppressed only when the payload bytes match the TLS
+        record-layer heuristic (content type + version magic).  Checking
+        port 443 alone is insufficient — attackers frequently tunnel non-TLS
+        C2 traffic over port 443 specifically to evade naïve port-based
+        filters.
+        """
+        alerts = []
+
+        if len(raw_payload) < self._ENTROPY_MIN_BYTES:
+            return alerts
+
+        # Suppress only confirmed TLS records, not merely port-443 traffic
+        if _is_tls_record(raw_payload):
+            return alerts
+
+        entropy = calculate_entropy(raw_payload)
+
+        if entropy >= self._ENTROPY_HIGH_THRESHOLD:
+            alerts.append({
+                'alert_type': 'encrypted_payload',
+                'severity': 'medium',
+                'src_ip': pkt_data.get('src_ip'),
+                'dst_ip': pkt_data.get('dst_ip'),
+                'description': (
+                    f'High-entropy payload detected (entropy={entropy:.2f} bits/byte) '
+                    f'on non-TLS {pkt_data.get("protocol", "")} flow — '
+                    f'possible encrypted C2, packed malware, or covert channel'
+                ),
+                'evidence': json.dumps({
+                    'entropy': round(entropy, 4),
+                    'payload_size': len(raw_payload),
+                    'protocol': pkt_data.get('protocol'),
+                    'dst_port': pkt_data.get('dst_port'),
+                    'threshold': self._ENTROPY_HIGH_THRESHOLD,
+                }),
+            })
+        elif entropy >= self._ENTROPY_MED_THRESHOLD:
+            alerts.append({
+                'alert_type': 'compressed_payload',
+                'severity': 'low',
+                'src_ip': pkt_data.get('src_ip'),
+                'dst_ip': pkt_data.get('dst_ip'),
+                'description': (
+                    f'Moderately high-entropy payload (entropy={entropy:.2f} bits/byte) '
+                    f'— possibly compressed data or partial encryption'
+                ),
+                'evidence': json.dumps({
+                    'entropy': round(entropy, 4),
+                    'payload_size': len(raw_payload),
+                    'protocol': pkt_data.get('protocol'),
+                    'dst_port': pkt_data.get('dst_port'),
+                }),
+            })
+
+        return alerts
+
+    # -----------------------------------------------------------------------
+    # Engine 6: Botnet / C2 blacklist
+    # -----------------------------------------------------------------------
+
+    def _check_botnet_blacklist(self, pkt_data: dict) -> List[dict]:
+        """Flag traffic to/from known malicious IPs and domains."""
+        alerts = []
+        src_ip = pkt_data.get('src_ip', '')
+        dst_ip = pkt_data.get('dst_ip', '')
+        dns_query = pkt_data.get('dns_query', '')
+
+        # IP checks
+        for suspect_ip, role in [(src_ip, 'source'), (dst_ip, 'destination')]:
+            if suspect_ip and suspect_ip in BOTNET_IP_BLACKLIST:
+                alerts.append({
+                    'alert_type': 'botnet_c2',
+                    'severity': 'critical',
+                    'src_ip': src_ip,
+                    'dst_ip': dst_ip,
+                    'description': (
+                        f'Traffic {role} IP {suspect_ip} matches known botnet / '
+                        f'C2 blacklist — possible malware command-and-control '
+                        f'communication'
+                    ),
+                    'evidence': json.dumps({
+                        'blacklisted_ip': suspect_ip,
+                        'role': role,
+                        'protocol': pkt_data.get('protocol'),
+                        'dst_port': pkt_data.get('dst_port'),
+                    }),
+                })
+
+        # Domain check (DNS queries)
+        if dns_query:
+            # Normalise: strip trailing dot, lowercase
+            domain = dns_query.rstrip('.').lower()
+            if domain in BOTNET_DOMAIN_BLACKLIST:
+                alerts.append({
+                    'alert_type': 'botnet_c2',
+                    'severity': 'critical',
+                    'src_ip': src_ip,
+                    'dst_ip': dst_ip,
+                    'description': (
+                        f'DNS query for blacklisted domain "{domain}" — '
+                        f'possible malware C2 / botnet beacon'
+                    ),
+                    'evidence': json.dumps({
+                        'blacklisted_domain': domain,
+                        'protocol': pkt_data.get('protocol'),
+                    }),
+                })
 
         return alerts
 
@@ -210,14 +474,21 @@ class PacketProcessor:
                 f['byte_count'] += length
                 f['last_seen'] = ts
 
-                # Threat detection
+                # Extract raw payload bytes for DPI engines
+                raw_payload: Optional[bytes] = None
+                if Raw in pkt:
+                    raw_payload = pkt[Raw].load
+
+                # Threat detection (all engines)
                 pkt_data = {
                     'src_ip': src_ip, 'dst_ip': dst_ip,
                     'src_port': src_port, 'dst_port': dst_port,
                     'protocol': proto_name, 'dns_query': dns_query,
-                    'length': length
+                    'length': length,
                 }
-                detected = self.detector.analyze_packet(pkt_data)
+                detected = self.detector.analyze_packet(
+                    pkt_data, raw_payload=raw_payload
+                )
                 all_alerts.extend(detected)
 
                 processed_count += 1
@@ -261,10 +532,13 @@ class PacketProcessor:
                     )
                     self.db.add(db_alert)
 
-                    if a.get('severity', '').lower() == 'high' or a.get('alert_type') in (
+                    if a.get('severity', '').lower() in ('high', 'critical') or a.get('alert_type') in (
                         'dns_tunneling',
                         'port_scan',
-                        'icmp_tunnel'
+                        'icmp_tunnel',
+                        'botnet_c2',
+                        'data_exfiltration',
+                        'encrypted_payload',
                     ):
                         try:
                             auto_create_case_for_alert(

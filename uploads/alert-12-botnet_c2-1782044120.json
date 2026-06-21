@@ -1,0 +1,11 @@
+{
+  "session_id": 12,
+  "alert_type": "botnet_c2",
+  "severity": "critical",
+  "description": "Traffic destination IP 194.165.16.78 matches known botnet / C2 blacklist \u2014 possible malware command-and-control communication",
+  "src_ip": "192.168.29.245",
+  "dst_ip": "194.165.16.78",
+  "evidence": "{\"blacklisted_ip\": \"194.165.16.78\", \"role\": \"destination\", \"protocol\": \"HTTP\", \"dst_port\": 80}",
+  "created_at": 1782044120,
+  "source_file": "./uploads\\b0682f99-4bbe-4a35-bdba-5394f5b26047.pcap"
+}

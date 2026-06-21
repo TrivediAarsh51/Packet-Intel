@@ -1,0 +1,11 @@
+{
+  "session_id": 13,
+  "alert_type": "encrypted_payload",
+  "severity": "medium",
+  "description": "High-entropy payload detected (entropy=7.26 bits/byte) on non-TLS HTTPS flow \u2014 possible encrypted C2, packed malware, or covert channel",
+  "src_ip": "192.168.29.245",
+  "dst_ip": "151.101.1.140",
+  "evidence": "{\"entropy\": 7.2599, \"payload_size\": 300, \"protocol\": \"HTTPS\", \"dst_port\": 443, \"threshold\": 7.2}",
+  "created_at": 1782044362,
+  "source_file": "./uploads\\0fceb011-0ec0-4d2f-8807-7f5cd7eb3882.pcap"
+}

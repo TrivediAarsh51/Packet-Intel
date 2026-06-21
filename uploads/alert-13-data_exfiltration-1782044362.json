@@ -1,0 +1,11 @@
+{
+  "session_id": 13,
+  "alert_type": "data_exfiltration",
+  "severity": "critical",
+  "description": "US Social Security Number detected in payload: 123-***6789",
+  "src_ip": "192.168.29.245",
+  "dst_ip": "194.165.16.78",
+  "evidence": "{\"signature_name\": \"ssn\", \"protocol\": \"HTTP\", \"dst_port\": 80, \"payload_size\": 15}",
+  "created_at": 1782044362,
+  "source_file": "./uploads\\0fceb011-0ec0-4d2f-8807-7f5cd7eb3882.pcap"
+}

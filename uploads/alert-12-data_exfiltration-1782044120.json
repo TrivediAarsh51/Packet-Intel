@@ -1,0 +1,11 @@
+{
+  "session_id": 12,
+  "alert_type": "data_exfiltration",
+  "severity": "high",
+  "description": "Hardcoded credential pattern detected in payload: pass*******3456",
+  "src_ip": "192.168.29.245",
+  "dst_ip": "172.16.0.171",
+  "evidence": "{\"signature_name\": \"hardcoded_credential\", \"protocol\": \"HTTP\", \"dst_port\": 80, \"payload_size\": 42}",
+  "created_at": 1782044120,
+  "source_file": "./uploads\\b0682f99-4bbe-4a35-bdba-5394f5b26047.pcap"
+}
