@@ -95,11 +95,25 @@ class PacketProcessor:
         if not SCAPY_AVAILABLE:
             raise RuntimeError('Scapy is not installed. Run: pip install scapy')
 
-        try:
-            file_hash = compute_sha256(file_path)
-            file_size = os.path.getsize(file_path)
+        from .encryption import decrypt_data
+        import io
+        import hashlib
 
-            packets = rdpcap(file_path)
+        try:
+            with open(file_path, 'rb') as f:
+                encrypted_data = f.read()
+
+            try:
+                decrypted_data = decrypt_data(encrypted_data)
+            except Exception as e:
+                raise ValueError("Failed to decrypt PCAP file.") from e
+
+            file_hash = hashlib.sha256(decrypted_data).hexdigest()
+            file_size = len(decrypted_data)
+
+            pcap_io = io.BytesIO(decrypted_data)
+            pcap_io.name = file_path
+            packets = rdpcap(pcap_io)
             processed_count = 0
             flows = {}
             all_alerts: List[dict] = []

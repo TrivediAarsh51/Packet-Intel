@@ -1,0 +1,11 @@
+{
+  "session_id": 9,
+  "alert_type": "port_scan",
+  "severity": "medium",
+  "description": "Possible port scan from 10.0.2.12: 21 unique destination ports probed",
+  "src_ip": "10.0.2.12",
+  "dst_ip": "192.168.1.120",
+  "evidence": "{\"unique_ports\": 21}",
+  "created_at": 1782038206,
+  "source_file": "./uploads\\d35365f4-416e-4f38-84b7-544907bdd954.pcap"
+}

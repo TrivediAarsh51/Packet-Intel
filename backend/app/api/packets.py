@@ -30,8 +30,12 @@ async def upload_pcap(
     ext = file.filename.rsplit('.', 1)[-1]
     file_path = os.path.join(UPLOAD_DIR, f"{file_id}.{ext}")
     
+    from ..core.encryption import encrypt_data
+    file_data = file.file.read()
+    encrypted_data = encrypt_data(file_data)
+
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(encrypted_data)
     
     session = CaptureSession(
         name=file.filename,

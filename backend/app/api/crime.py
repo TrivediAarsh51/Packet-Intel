@@ -61,7 +61,7 @@ def add_evidence(case_id: int, evidence: EvidenceCreate):
 
 @router.get('/evidence/{evidence_id}/verify')
 def verify_evidence(evidence_id: str):
-    result = evidence.verify_evidence(evidence_id)
+    result = evidence_core.verify_evidence(evidence_id)
     if not result.get('found'):
         raise HTTPException(status_code=404, detail='Evidence not found in chain')
     return result
