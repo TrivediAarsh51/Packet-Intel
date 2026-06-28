@@ -18,8 +18,12 @@ const Login: React.FC = () => {
     setLoading(true);
 
     try {
-      await authService.login(username, password);
-      navigate('/');
+      const result = await authService.login(username, password);
+      if (result.force_reset) {
+        navigate('/reset-password');
+      } else {
+        navigate('/');
+      }
     } catch (err: any) {
       console.error(err);
       setError(err.response?.data?.detail || 'Invalid username or password. Please try again.');
@@ -106,12 +110,7 @@ const Login: React.FC = () => {
           </button>
         </form>
 
-        <p className="mt-8 text-center text-xs text-slate-400">
-          First session?{' '}
-          <Link to="/signup" className="text-blue-400 hover:text-blue-300 font-semibold transition-colors">
-            Register new investigator profile
-          </Link>
-        </p>
+
       </div>
     </div>
   );

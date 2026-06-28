@@ -73,6 +73,11 @@ export const authService = {
       }
     }
     return null;
+  },
+
+  async createUser(username: string, email: string, role: string) {
+    const response = await api.post('/auth/create-user', { username, email, role });
+    return response.data;
   }
 };
 

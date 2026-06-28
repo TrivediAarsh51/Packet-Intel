@@ -42,6 +42,12 @@ npm run dev
 # Frontend running on http://localhost:5173
 ```
 
+#### Bootstrap Super Admin (Cold Start)
+Public signup is disabled. Provision the initial `super_admin` account using the bootstrap script:
+```powershell
+# In the backend directory with venv activated
+python scripts/bootstrap_superadmin.py --username admin --password "SecurePassword123!"
+```
 ---
 
 ## Core Modules Overview

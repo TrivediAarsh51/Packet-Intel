@@ -37,3 +37,40 @@ def decode_token(token: str) -> Optional[dict]:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
         return None
+
+from fastapi import Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from ..database import get_db
+from ..models import User
+
+ROLE_PERMISSIONS = {
+    "analyst": ["view_packets"],
+    "operator": ["view_packets", "manage_capture", "manage_cases"],
+    "auditor": ["view_packets", "export_logs"],
+    "super_admin": ["view_packets", "manage_capture", "delete_session", "export_logs", "manage_users", "generate_credentials", "manage_cases"]
+}
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    payload = decode_token(token)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    user = db.query(User).filter(User.username == payload.get("sub")).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    return user
+
+def require_permission(permission_name: str):
+    def permission_dependency(current_user: User = Depends(get_current_user)):
+        perms = ROLE_PERMISSIONS.get(current_user.role, [])
+        if permission_name not in perms:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        return current_user
+    return permission_dependency
+
+def get_current_admin_user(current_user: User = Depends(get_current_user)):
+    if current_user.role != "super_admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Requires super_admin role")
+    return current_user
+

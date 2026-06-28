@@ -12,7 +12,8 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    role = Column(String, default='user', nullable=False)
+    role = Column(String, default='analyst', nullable=False)
+    requires_password_reset = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     sessions = relationship('CaptureSession', back_populates='user')
@@ -88,3 +89,13 @@ class Alert(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     is_acknowledged = Column(Boolean, default=False)
     session = relationship('CaptureSession', back_populates='alerts')
+
+
+class AuditLog(Base):
+    __tablename__ = 'audit_logs'
+    id = Column(Integer, primary_key=True, index=True)
+    actor_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    action = Column(String, nullable=False)
+    target = Column(String, nullable=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    actor = relationship('User')

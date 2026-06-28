@@ -18,7 +18,12 @@ import LiveCapture from './pages/LiveCapture';
 import CrimeBoard from './pages/CrimeBoard';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
+import Forbidden from './pages/Forbidden';
+import ResetPassword from './pages/ResetPassword';
+import UserManagement from './pages/UserManagement';
+import ProtectedRoute from './components/ProtectedRoute';
 import { authService } from './services/api';
+import { hasPermission } from './utils/permissions';
 
 const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -49,11 +54,12 @@ const App: React.FC = () => {
   };
 
   // If on login/signup pages, render them without sidebar/header layout
-  if (location.pathname === '/login' || location.pathname === '/signup') {
+  if (location.pathname === '/login' || location.pathname === '/signup' || location.pathname === '/reset-password') {
     return (
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
       </Routes>
     );
   }
@@ -61,8 +67,9 @@ const App: React.FC = () => {
   const navItems = [
     { name: 'Dashboard', path: '/', icon: BarChart3 },
     { name: 'Packet Explorer', path: '/packets', icon: FileSearch },
-    { name: 'Live Capture', path: '/live', icon: Activity },
+    { name: 'Live Capture', path: '/live', icon: Activity, permission: 'manage_capture' },
     { name: 'Crime Board', path: '/crime', icon: Shield },
+    { name: 'Users', path: '/users', icon: Settings, permission: 'manage_users' }
   ];
 
   return (
@@ -78,6 +85,7 @@ const App: React.FC = () => {
 
         <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto custom-scrollbar">
           {navItems.map((item) => {
+            if (item.permission && user && !hasPermission(user, item.permission)) return null;
             const isActive = location.pathname === item.path;
             return (
               <Link
@@ -143,10 +151,12 @@ const App: React.FC = () => {
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/packets" element={<PacketExplorer />} />
-            <Route path="/live" element={<LiveCapture />} />
-            <Route path="/crime" element={<CrimeBoard />} />
+            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/packets" element={<ProtectedRoute><PacketExplorer /></ProtectedRoute>} />
+            <Route path="/live" element={<ProtectedRoute requiredPermission="manage_capture"><LiveCapture /></ProtectedRoute>} />
+            <Route path="/crime" element={<ProtectedRoute><CrimeBoard /></ProtectedRoute>} />
+            <Route path="/users" element={<ProtectedRoute requiredPermission="manage_users"><UserManagement /></ProtectedRoute>} />
+            <Route path="/403" element={<Forbidden />} />
           </Routes>
         </div>
       </main>

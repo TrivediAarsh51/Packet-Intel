@@ -11,7 +11,8 @@ import {
   CheckCircle2, 
   FileText 
 } from 'lucide-react';
-import { packetService } from '../services/api';
+import { packetService, authService } from '../services/api';
+import { hasPermission } from '../utils/permissions';
 
 const LiveCapture: React.FC = () => {
   const [interfaces, setInterfaces] = useState<any[]>([]);
@@ -29,6 +30,9 @@ const LiveCapture: React.FC = () => {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const user = authService.getCurrentUser();
+  const canManageCapture = hasPermission(user, 'manage_capture');
 
   // References for timers/intervals
   const pollIntervalRef = useRef<any | null>(null);
@@ -234,14 +238,20 @@ const LiveCapture: React.FC = () => {
                   />
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={loading || interfaces.length === 0}
-                  className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium rounded-lg transition-all duration-200 shadow-lg shadow-blue-500/25 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2 text-sm font-semibold"
-                >
-                  <Play size={16} />
-                  {loading ? 'Initializing Interface...' : 'Begin Sniffer Snare'}
-                </button>
+                {canManageCapture ? (
+                  <button
+                    type="submit"
+                    disabled={loading || interfaces.length === 0}
+                    className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium rounded-lg transition-all duration-200 shadow-lg shadow-blue-500/25 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2 text-sm font-semibold"
+                  >
+                    <Play size={16} />
+                    {loading ? 'Initializing Interface...' : 'Begin Sniffer Snare'}
+                  </button>
+                ) : (
+                  <div className="w-full py-3 bg-slate-800 text-slate-500 font-medium rounded-lg text-center text-sm">
+                    You do not have permission to start captures
+                  </div>
+                )}
               </form>
             </div>
           ) : (
@@ -288,14 +298,20 @@ const LiveCapture: React.FC = () => {
                 </div>
 
                 <div className="pt-4 border-t border-slate-850">
-                  <button
-                    onClick={handleStopSniffing}
-                    disabled={loading}
-                    className="w-full py-3 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-medium rounded-lg transition-all duration-200 shadow-lg shadow-red-500/20 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2 text-sm font-semibold"
-                  >
-                    <Square size={14} fill="currentColor" />
-                    {loading ? 'Halting Sniffer...' : 'Halt Capture Session'}
-                  </button>
+                  {canManageCapture ? (
+                    <button
+                      onClick={handleStopSniffing}
+                      disabled={loading}
+                      className="w-full py-3 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-medium rounded-lg transition-all duration-200 shadow-lg shadow-red-500/20 active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2 text-sm font-semibold"
+                    >
+                      <Square size={14} fill="currentColor" />
+                      {loading ? 'Halting Sniffer...' : 'Halt Capture Session'}
+                    </button>
+                  ) : (
+                    <div className="w-full py-3 bg-slate-800 text-slate-500 font-medium rounded-lg text-center text-sm">
+                      You do not have permission to stop captures
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

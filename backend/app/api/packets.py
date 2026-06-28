@@ -9,6 +9,7 @@ from ..database import get_db
 from ..models import CaptureSession, Packet, TrafficFlow, Alert
 from ..core.parser import PacketProcessor
 from ..core.capture import LiveCaptureManager
+from ..core.auth import require_permission
 from ..schemas.packet import SessionResponse, PacketResponse, FlowResponse, AlertResponse, DashboardStats
 
 router = APIRouter()
@@ -67,7 +68,11 @@ async def get_session(session_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: int, db: Session = Depends(get_db)):
+async def delete_session(
+    session_id: int, 
+    db: Session = Depends(get_db),
+    current_user = Depends(require_permission("delete_session"))
+):
     session = db.query(CaptureSession).filter(CaptureSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -229,7 +234,8 @@ async def start_live_capture(
     interface: str,
     name: Optional[str] = None,
     description: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(require_permission("manage_capture"))
 ):
     session = CaptureSession(
         name=name or f"Live Capture - {interface}",
@@ -253,7 +259,11 @@ async def start_live_capture(
 
 
 @router.post("/live/stop/{session_id}")
-async def stop_live_capture(session_id: int, db: Session = Depends(get_db)):
+async def stop_live_capture(
+    session_id: int, 
+    db: Session = Depends(get_db),
+    current_user = Depends(require_permission("manage_capture"))
+):
     session = db.query(CaptureSession).filter(CaptureSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")

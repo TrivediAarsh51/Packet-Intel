@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
 from ..core import crime_db
 from ..core import evidence as evidence_core
+from ..core.auth import require_permission
 import os
 
 router = APIRouter()
@@ -19,7 +20,7 @@ class EvidenceCreate(BaseModel):
 
 
 @router.post("/cases", status_code=status.HTTP_201_CREATED)
-def create_case(case: CaseCreate):
+def create_case(case: CaseCreate, current_user = Depends(require_permission("manage_cases"))):
     db_path = os.getenv('CRIME_DB_PATH', os.path.join(os.path.dirname(__file__), '..', '..', '..', 'storage', 'mock_crime.db'))
     crime_db.init_db(db_path)
     case_id = crime_db.create_case(db_path, case.title, case.description, case.reporter)
@@ -45,7 +46,7 @@ def get_case(case_id: int):
 
 
 @router.post("/cases/{case_id}/evidence", status_code=status.HTTP_201_CREATED)
-def add_evidence(case_id: int, evidence: EvidenceCreate):
+def add_evidence(case_id: int, evidence: EvidenceCreate, current_user = Depends(require_permission("manage_cases"))):
     db_path = os.getenv('CRIME_DB_PATH', os.path.join(os.path.dirname(__file__), '..', '..', '..', 'storage', 'mock_crime.db'))
     crime_db.init_db(db_path)
     if not crime_db.get_case(db_path, case_id):

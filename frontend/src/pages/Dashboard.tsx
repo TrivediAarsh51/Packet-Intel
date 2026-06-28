@@ -22,7 +22,8 @@ import {
   Pie,
   Cell
 } from 'recharts';
-import { packetService } from '../services/api';
+import { packetService, authService } from '../services/api';
+import { hasPermission } from '../utils/permissions';
 import UploadPCAP from '../components/UploadPCAP';
 
 const PROTO_COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#6366f1'];
@@ -50,6 +51,9 @@ const Dashboard: React.FC = () => {
   const [alerts, setAlerts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const user = authService.getCurrentUser();
+  const canDelete = hasPermission(user, 'delete_session');
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
@@ -396,12 +400,14 @@ const Dashboard: React.FC = () => {
                     <td className="px-6 py-4 text-sm text-slate-400 font-mono">{formatBytes(session.file_size)}</td>
                     <td className="px-6 py-4 text-xs text-slate-500">{new Date(session.created_at).toLocaleString()}</td>
                     <td className="px-6 py-4">
-                      <button 
-                        onClick={() => handleDeleteSession(session.id)}
-                        className="p-1.5 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-lg transition-colors border border-transparent hover:border-rose-500/20"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      {canDelete && (
+                        <button 
+                          onClick={() => handleDeleteSession(session.id)}
+                          className="p-1.5 hover:bg-rose-500/10 text-slate-500 hover:text-rose-400 rounded-lg transition-colors border border-transparent hover:border-rose-500/20"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
